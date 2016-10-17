@@ -1,64 +1,29 @@
 import machine
 import ubinascii as binascii
-import webrepl
 
-from umqtt import MQTTClient
+from umqtt.simple import MQTTClient
 
 # These defaults are overwritten with the contents of /config.json by load_config()
 CONFIG = {
-    "broker": "192.168.1.1", # Set this to your MQTT broker IP address/hostname
-    "button_pin": 0,
-    "relay_pin": 12,
-    "led_pin": 13,
-    "client_id": b"sonoff_" +binascii.hexlify(machine.unique_id()),
-    "default_on": False,
+    "broker": "10.0.1.216", # Set this to your MQTT broker IP address/hostname
+    "neopixel_pin": 5,
+    "neopixel_count": 19,
+    "client_id": b"pumpkin_" +binascii.hexlify(machine.unique_id()),
 }
 
 
-relay_pin = None
-led_pin = None
+strip = None
 client = None
 
 def callback(topic, msg):
     print("Got a message!")
     if topic == topic_name(b"control"):
-        if msg == b"on":
-            print("Turning relay ON")
-            switch_on()
-            publish_state()
-        elif msg == b"off":
-            print("Turning relay OFF")
-            switch_off()
-            publish_state()
-        elif msg == b"toggle":
-            toggle_state()
-            publish_state()
-        elif msg == b"state?":
-            publish_state()
+        if msg.startswith(b"rgb:"):
+            set_colour(msg)
         elif msg == b"webrepl":
             webrepl.start_foreground()
         else:
             print("Unknown message type, ignoring")
-
-def switch_on():
-    relay_pin.high()
-    led_pin.low() # LED pin state is inverted
-
-def switch_off():
-    relay_pin.low()
-    led_pin.high()
-
-def toggle_state():
-    if relay_pin.value():
-        switch_off()
-    else:
-        switch_on()
-
-def external_button_callback(pin):
-    if relay_pin.value():
-        switch_off()
-    else:
-        switch_on()
 
 def publish_state():
     if relay_pin.value():
@@ -75,6 +40,14 @@ def topic_name(*args):
     parts.insert(0, client_id)
     return b"/".join(parts)
 
+def set_colour(msg):
+    msg_type, payload = msg.split(b":", 1)
+    if msg_type != b"rgb":
+        return
+    r, g, b = (int(v) for v in payload.split(b":"))
+    strip.fill((r, g, b))
+    strip.write()
+
 def connect_and_subscribe():
     global client
     client = MQTTClient(CONFIG['client_id'], CONFIG['broker'])
@@ -85,19 +58,10 @@ def connect_and_subscribe():
     client.subscribe(topic)
     print("Subscribed to {}".format(topic))
 
-def setup_pins():
-    global relay_pin, led_pin
-    relay_pin = machine.Pin(CONFIG['relay_pin'], machine.Pin.OUT)
-    led_pin = machine.Pin(CONFIG['led_pin'], machine.Pin.OUT)
-    if CONFIG['default_on']:
-        switch_on()
-    else:
-        switch_off()
-
-def setup_button_interrupt():
-    # When the button is pushed, toggle the relay state.
-    button_pin = machine.Pin(CONFIG['button_pin'], machine.Pin.IN)
-    button_pin.irq(trigger=machine.Pin.IRQ_FALLING, handler=external_button_callback)
+def setup_neopixels():
+    global strip
+    import neopixel
+    strip = neopixel.NeoPixel(machine.Pin(CONFIG['neopixel_pin']), CONFIG['neopixel_count'])
 
 def load_config():
     import ujson as json
@@ -121,8 +85,7 @@ def save_config():
 
 def setup():
     load_config()
-    setup_pins()
-    setup_button_interrupt()
+    setup_neopixels()
     connect_and_subscribe()
 
 def main_loop():
