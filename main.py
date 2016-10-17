@@ -12,18 +12,27 @@ CONFIG = {
 }
 
 
+brightness = 2 # percent
+colour = (255, 255, 255)
+powered_on = True
 strip = None
 client = None
 
 def callback(topic, msg):
     print("Got a message!")
     if topic == topic_name(b"control"):
-        if msg.startswith(b"rgb:"):
-            set_colour(msg)
-        elif msg == b"webrepl":
-            webrepl.start_foreground()
-        else:
-            print("Unknown message type, ignoring")
+        try:
+            msg_type, payload = msg.split(b":", 1)
+            if msg_type == b"rgb":
+                set_colour(payload)
+            if msg_type == b"brightness":
+                set_brightness(payload)
+            if msg_type == b"power":
+                set_power(payload)
+            else:
+                print("Unknown message type, ignoring")
+        except Exception:
+            print("Couldn't parse/handle message, ignoring.")
 
 def publish_state():
     if relay_pin.value():
@@ -41,11 +50,26 @@ def topic_name(*args):
     return b"/".join(parts)
 
 def set_colour(msg):
-    msg_type, payload = msg.split(b":", 1)
-    if msg_type != b"rgb":
-        return
-    r, g, b = (int(v) for v in payload.split(b":"))
-    strip.fill((r, g, b))
+    global colour
+    colour = (int(v) for v in payload.split(b":"))
+    update_strip()
+
+def set_brightness(msg):
+    global brightness
+    brightness = max(0, min(100, int(msg)))
+    update_strip()
+
+def set_power(msg):
+    global powered_on
+    powered_on = msg == b"on"
+    update_strip()
+
+def update_strip():
+    if powered_on:
+        r, g, b = (int(v * (brightness/100)) for v in colour)
+        strip.fill((r, g, b))
+    else:
+        strip.fill((0, 0, 0))
     strip.write()
 
 def connect_and_subscribe():
@@ -62,6 +86,7 @@ def setup_neopixels():
     global strip
     import neopixel
     strip = neopixel.NeoPixel(machine.Pin(CONFIG['neopixel_pin']), CONFIG['neopixel_count'])
+    update_strip()
 
 def load_config():
     import ujson as json
