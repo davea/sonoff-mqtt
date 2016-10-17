@@ -3,6 +3,8 @@ import ubinascii as binascii
 
 from umqtt.simple import MQTTClient
 
+from colorsys import hsv_to_rgb
+
 # These defaults are overwritten with the contents of /config.json by load_config()
 CONFIG = {
     "broker": "10.0.1.216", # Set this to your MQTT broker IP address/hostname
@@ -12,9 +14,11 @@ CONFIG = {
 }
 
 
-brightness = 2 # percent
-colour = (255, 255, 255)
+hue = 0.3
+saturation = 0.0
+brightness = 0.02
 powered_on = True
+
 strip = None
 client = None
 
@@ -23,11 +27,13 @@ def callback(topic, msg):
     if topic == topic_name(b"control"):
         try:
             msg_type, payload = msg.split(b":", 1)
-            if msg_type == b"rgb":
-                set_colour(payload)
-            if msg_type == b"brightness":
+            if msg_type == b"h":
+                set_hue(payload)
+            elif msg_type == b"s":
+                set_saturation(payload)
+            elif msg_type == b"b":
                 set_brightness(payload)
-            if msg_type == b"power":
+            elif msg_type == b"power":
                 set_power(payload)
             else:
                 print("Unknown message type, ignoring")
@@ -49,14 +55,19 @@ def topic_name(*args):
     parts.insert(0, client_id)
     return b"/".join(parts)
 
-def set_colour(msg):
-    global colour
-    colour = (int(v) for v in payload.split(b":"))
-    update_strip()
-
 def set_brightness(msg):
     global brightness
-    brightness = max(0, min(100, int(msg)))
+    brightness = max(0.0, min(100.0, int(msg))) / 100.0
+    update_strip()
+
+def set_saturation(msg):
+    global saturation
+    saturation = max(0.0, min(100.0, float(msg.decode("utf-8")))) / 100.0
+    update_strip()
+
+def set_hue(msg):
+    global hue
+    hue = max(0.0, min(360.0, float(msg.decode("utf-8")))) / 360.0
     update_strip()
 
 def set_power(msg):
@@ -66,7 +77,8 @@ def set_power(msg):
 
 def update_strip():
     if powered_on:
-        r, g, b = (int(v * (brightness/100)) for v in colour)
+        r, g, b = hsv_to_rgb(hue, saturation, brightness)
+        r, g, b = int(r*255), int(g*255), int(b*255)
         strip.fill((r, g, b))
     else:
         strip.fill((0, 0, 0))
