@@ -3,27 +3,20 @@ import ubinascii as binascii
 
 from umqtt.simple import MQTTClient
 
-from colorsys import hsv_to_rgb
+from config import broker
 
-# These defaults are overwritten with the contents of /config.json by load_config()
-CONFIG = {
-    "broker": "10.0.1.216", # Set this to your MQTT broker IP address/hostname
-    "neopixel_pin": 5,
-    "neopixel_count": 19,
-    "client_id": b"pumpkin_" +binascii.hexlify(machine.unique_id()),
-}
+machine_id = binascii.hexlify(machine.unique_id())
+print(b"Machine ID: {}".format(machine_id))
 
-
-hue = 0.3
+hue = 0.0
 saturation = 0.0
-brightness = 0.02
-powered_on = True
+brightness = 0.0
+powered_on = False
 
 strip = None
 client = None
 
 def callback(topic, msg):
-    print("Got a message!")
     if topic == topic_name(b"control"):
         try:
             msg_type, payload = msg.split(b":", 1)
@@ -39,6 +32,8 @@ def callback(topic, msg):
                 print("Unknown message type, ignoring")
         except Exception:
             print("Couldn't parse/handle message, ignoring.")
+    elif topic == topic_name(b"config"):
+        load_config(msg)
 
 def publish_state():
     if relay_pin.value():
@@ -47,13 +42,8 @@ def publish_state():
         client.publish(topic_name(b"state"), b"off")
     print("Relay state: {}".format("on" if relay_pin.value() else "off"))
 
-def topic_name(*args):
-    parts = list(args)
-    client_id = CONFIG['client_id']
-    if isinstance(client_id, str):
-        client_id = client_id.encode("ascii")
-    parts.insert(0, client_id)
-    return b"/".join(parts)
+def topic_name(topic):
+    return b"/".join([b"light", machine_id, topic])
 
 def set_brightness(msg):
     global brightness
@@ -62,20 +52,26 @@ def set_brightness(msg):
 
 def set_saturation(msg):
     global saturation
-    saturation = max(0.0, min(100.0, float(msg.decode("utf-8")))) / 100.0
+    msg = msg.decode("utf-8") if isinstance(msg, bytes) else msg
+    saturation = max(0.0, min(100.0, float(msg))) / 100.0
     update_strip()
 
 def set_hue(msg):
     global hue
-    hue = max(0.0, min(360.0, float(msg.decode("utf-8")))) / 360.0
+    msg = msg.decode("utf-8") if isinstance(msg, bytes) else msg
+    hue = max(0.0, min(360.0, float(msg))) / 360.0
     update_strip()
 
 def set_power(msg):
     global powered_on
-    powered_on = msg == b"on"
+    msg = msg.decode("utf-8") if isinstance(msg, bytes) else msg
+    powered_on = msg == "on"
     update_strip()
 
 def update_strip():
+    if strip is None:
+        print("Strip hasn't been configured yet, can't update.")
+        return
     if powered_on:
         r, g, b = hsv_to_rgb(hue, saturation, brightness)
         r, g, b = int(r*255), int(g*255), int(b*255)
@@ -86,43 +82,35 @@ def update_strip():
 
 def connect_and_subscribe():
     global client
-    client = MQTTClient(CONFIG['client_id'], CONFIG['broker'])
+    client = MQTTClient(machine_id, broker)
     client.set_callback(callback)
     client.connect()
-    print("Connected to {}".format(CONFIG['broker']))
-    topic = topic_name(b"control")
-    client.subscribe(topic)
-    print("Subscribed to {}".format(topic))
+    print("Connected to {}".format(broker))
+    for topic in (b'config', b'control'):
+        t = topic_name(topic)
+        client.subscribe(t)
+        print("Subscribed to {}".format(t))
 
-def setup_neopixels():
+def setup_neopixels(pin, count):
     global strip
     import neopixel
-    strip = neopixel.NeoPixel(machine.Pin(CONFIG['neopixel_pin']), CONFIG['neopixel_count'])
+    strip = neopixel.NeoPixel(machine.Pin(pin), count)
     update_strip()
 
-def load_config():
+def load_config(msg):
     import ujson as json
     try:
-        with open("/config.json") as f:
-            config = json.loads(f.read())
+        config = json.loads(msg)
     except (OSError, ValueError):
-        print("Couldn't load /config.json")
-        save_config() # Might be first run, so save config.
+        print("Couldn't load config from JSON, bailing out.")
     else:
-        CONFIG.update(config)
-        print("Loaded config from /config.json")
-
-def save_config():
-    import ujson as json
-    try:
-        with open("/config.json", "w") as f:
-            f.write(json.dumps(CONFIG))
-    except OSError:
-        print("Couldn't save /config.json")
+        set_hue(config['hue'])
+        set_saturation(config['saturation'])
+        set_brightness(config['brightness'])
+        set_power(config['power'])
+        setup_neopixels(config['gpio_pin'], config['led_count'])
 
 def setup():
-    load_config()
-    setup_neopixels()
     connect_and_subscribe()
 
 def main_loop():
@@ -135,6 +123,28 @@ def teardown():
         print("Disconnected.")
     except Exception:
         print("Couldn't disconnect cleanly.")
+
+def hsv_to_rgb(h, s, v):
+    if s == 0.0:
+        return v, v, v
+    i = int(h*6.0)
+    f = (h*6.0) - i
+    p = v*(1.0 - s)
+    q = v*(1.0 - s*f)
+    t = v*(1.0 - s*(1.0-f))
+    i = i%6
+    if i == 0:
+        return v, t, p
+    if i == 1:
+        return q, v, p
+    if i == 2:
+        return p, v, t
+    if i == 3:
+        return p, q, v
+    if i == 4:
+        return t, p, v
+    if i == 5:
+        return v, p, q
 
 if __name__ == '__main__':
     setup()

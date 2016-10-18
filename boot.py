@@ -1,7 +1,6 @@
 def do_connect():
     import network
-    SSID = 'your wifi ssid here'
-    PSK = 'your wifi key here'
+    from config import ssid, psk
     sta_if = network.WLAN(network.STA_IF)
     ap_if = network.WLAN(network.AP_IF)
     if ap_if.active():
@@ -9,7 +8,7 @@ def do_connect():
     if not sta_if.isconnected():
         print('connecting to network...')
         sta_if.active(True)
-        sta_if.connect(SSID, PSK)
+        sta_if.connect(ssid, psk)
         while not sta_if.isconnected():
             pass
     print('network config:', sta_if.ifconfig())

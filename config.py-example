@@ -1,0 +1,3 @@
+ssid = b"wifi name"
+psk = b"wifi password"
+broker = b"192.168.0.10"
